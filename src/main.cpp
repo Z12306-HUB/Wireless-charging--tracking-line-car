@@ -11,20 +11,20 @@
 #define SERVO_PIN 27      // 舵机引脚
 
 // ==================== 优化参数配置 ====================
-#define TRACK_INTERVAL 50    // 循迹修正间隔（毫秒）大幅缩短
-#define BASE_SPEED 180       // 循迹基础速度（0-255）
-#define CURVE_SPEED 150      // 弯道速度
-#define SHARP_TURN_SPEED 120 // 急弯速度
+#define TRACK_INTERVAL 50    // 循迹修正间隔（毫秒）
+#define BASE_SPEED 200       // 循迹基础速度（0-255）
+#define CURVE_SPEED 200      // 弯道速度
+#define SHARP_TURN_SPEED 200 // 急弯速度
 
 // PID控制参数（简单比例控制）
-#define KP 2.5 // 比例系数
-#define KD 0.8 // 微分系数
+#define KP 0.3f // 比例系数（改为浮点数）
+#define KD 0.8f // 微分系数（改为浮点数）
 
-// 舵机参数
-#define SERVO_CENTER 80     // 舵机中位角度
-#define SERVO_MIN 60        // 舵机最小安全角度
-#define SERVO_MAX 100       // 舵机最大安全角度
-#define MAX_ANGLE_CHANGE 15 // 单次最大角度变化量
+// 舵机参数（改为浮点数）
+#define SERVO_CENTER 85.0f     // 舵机中位角度
+#define SERVO_MIN 60.0f        // 舵机最小安全角度
+#define SERVO_MAX 110.0f       // 舵机最大安全角度
+#define MAX_ANGLE_CHANGE 15.0f // 单次最大角度变化量
 
 // ==================== 全局对象 ====================
 Motor motor(5, 18, 19);   // 电机对象（PWM, IN1, IN2）
@@ -32,16 +32,17 @@ Servo myservo;            // 舵机对象
 BluetoothSerial SerialBT; // 蓝牙对象
 
 // ==================== 全局状态变量 ====================
-bool isTracking = false;              // 循迹状态标志
-int currentServoAngle = SERVO_CENTER; // 当前舵机角度
-int lastError = 0;                    // 上次误差（用于微分项）
+bool isTracking = false;                // 循迹状态标志
+float currentServoAngle = SERVO_CENTER; // 当前舵机角度（改为浮点数）
+float lastError = 0;                    // 上次误差（改为浮点数）
 
 // ==================== 函数声明 ====================
 void moveStraight(int speed);
 void stopMotor();
 void proccessBluetoothCommands(String command);
 bool isAngleCommand(String cmd);
-void setServoAngle(int angle);
+bool isFloatAngleCommand(String cmd); // 新增浮点数命令检测
+void setServoAngle(float angle);      // 改为浮点数参数
 void showHelp();
 String sendIRSensorData();
 void sendIRtoBluetooth();
@@ -127,15 +128,23 @@ void stopMotor()
 // ==================== 蓝牙命令处理 ====================
 void proccessBluetoothCommands(String command)
 {
+  String originalCommand = command; // 保存原始命令
   command.trim();
   command.toUpperCase();
 
-  // 角度命令
-  if (isAngleCommand(command))
+  // 浮点数角度命令（支持小数点）
+  if (isFloatAngleCommand(originalCommand))
   {
-    int angle = command.toInt();
+    float angle = originalCommand.toFloat();
     setServoAngle(angle);
-    SerialBT.println("Set: " + String(angle) + "°");
+    SerialBT.println("Set: " + String(angle, 1) + "°"); // 显示1位小数
+  }
+  // 整数角度命令（向后兼容）
+  else if (isAngleCommand(command))
+  {
+    float angle = command.toFloat();
+    setServoAngle(angle);
+    SerialBT.println("Set: " + String(angle, 1) + "°");
   }
   // 开始循迹
   else if (command == "START")
@@ -181,6 +190,7 @@ void proccessBluetoothCommands(String command)
 }
 
 // ==================== 辅助函数 ====================
+// 整数角度命令检测（向后兼容）
 bool isAngleCommand(String cmd)
 {
   for (int i = 0; i < cmd.length(); i++)
@@ -188,16 +198,38 @@ bool isAngleCommand(String cmd)
     if (!isdigit(cmd[i]))
       return false;
   }
-  int value = cmd.toInt();
+  float value = cmd.toFloat();
   return (value >= SERVO_MIN && value <= SERVO_MAX);
 }
 
-void setServoAngle(int angle)
+// 浮点数角度命令检测（新增）
+bool isFloatAngleCommand(String cmd)
+{
+  bool hasDecimalPoint = false;
+  for (int i = 0; i < cmd.length(); i++)
+  {
+    if (cmd[i] == '.')
+    {
+      if (hasDecimalPoint)
+        return false; // 多个小数点
+      hasDecimalPoint = true;
+    }
+    else if (!isdigit(cmd[i]))
+    {
+      return false;
+    }
+  }
+  float value = cmd.toFloat();
+  return (value >= SERVO_MIN && value <= SERVO_MAX);
+}
+
+// 设置舵机角度（改为浮点数）
+void setServoAngle(float angle)
 {
   angle = constrain(angle, SERVO_MIN, SERVO_MAX);
-  myservo.write(angle);
+  myservo.write(angle); // 使用浮点数版本的write
   currentServoAngle = angle;
-  Serial.printf("设置舵机角度：%d°\n", angle);
+  Serial.printf("设置舵机角度：%.1f°\n", angle); // 浮点数格式输出
 }
 
 void showHelp()
@@ -207,7 +239,8 @@ void showHelp()
   helpMsg += "STOP     - 停止电机\n";
   helpMsg += "STOP_TRACK- 暂停循迹\n";
   helpMsg += "STRAIGHT - 手动直行\n";
-  helpMsg += "60-100   - 设置舵机角度\n";
+  helpMsg += "60-110   - 设置舵机角度（整数）\n";
+  helpMsg += "85.5     - 设置舵机角度（浮点数）\n";
   helpMsg += "HELP/?   - 显示帮助\n";
   helpMsg += "========================\n";
   helpMsg += "优化特性：50ms响应，PID控制，自适应速度";
@@ -246,7 +279,7 @@ void smoothLineTracking(int ir1, int ir2, int ir3, int ir4)
   static unsigned long lastAdjustTime = 0;
   unsigned long currentTime = millis();
 
-  // 50ms执行一次修正（大幅提高响应频率）
+  // 50ms执行一次修正
   if (currentTime - lastAdjustTime < TRACK_INTERVAL)
   {
     return;
@@ -254,20 +287,20 @@ void smoothLineTracking(int ir1, int ir2, int ir3, int ir4)
   lastAdjustTime = currentTime;
 
   // ===== 计算当前误差 =====
-  int error = 0;
+  float error = 0.0f; // 改为浮点数
 
-  // 传感器权重分配（可根据实际效果调整）
+  // 传感器权重分配
   if (ir1 == 1)
-    error -= 3; // 左外检测到：强烈左偏信号
+    error += 2.0f; // 左外检测到：强烈左偏信号
   if (ir2 == 1)
-    error -= 1; // 左内检测到：轻微左偏信号
+    error += 1.0f; // 左内检测到：轻微左偏信号
   if (ir3 == 1)
-    error += 1; // 右内检测到：轻微右偏信号
+    error -= 1.0f; // 右内检测到：轻微右偏信号
   if (ir4 == 1)
-    error += 3; // 右外检测到：强烈右偏信号
+    error -= 2.0f; // 右外检测到：强烈右偏信号
 
   // ===== PID控制计算 =====
-  int angleChange = 0;
+  float angleChange = 0.0f; // 改为浮点数
 
   // 比例项
   angleChange = error * KP;
@@ -283,12 +316,12 @@ void smoothLineTracking(int ir1, int ir2, int ir3, int ir4)
   int currentSpeed = BASE_SPEED;
 
   // 根据偏差大小调整速度
-  if (abs(error) >= 3)
+  if (fabs(error) >= 3.0f) // 使用fabs处理浮点数
   {
     // 急弯情况：大幅偏差，降低速度
     currentSpeed = SHARP_TURN_SPEED;
   }
-  else if (abs(error) >= 1)
+  else if (fabs(error) >= 1.0f)
   {
     // 普通弯道：中等偏差，适中速度
     currentSpeed = CURVE_SPEED;
@@ -303,13 +336,15 @@ void smoothLineTracking(int ir1, int ir2, int ir3, int ir4)
   motor.setSpeed(currentSpeed);
 
   // ===== 调试输出 =====
-  Serial.printf("传感器:%d%d%d%d 误差:%d 角度变化:%d 舵机:%d° 速度:%d\n",
+  Serial.printf("传感器:%d%d%d%d 误差:%.1f 角度变化:%.1f 舵机:%.1f° 速度:%d\n",
                 ir1, ir2, ir3, ir4, error, angleChange, currentServoAngle, currentSpeed);
 
   // 蓝牙发送关键数据（可选）
-  if (abs(error) >= 2)
-  { // 只在较大偏差时发送，避免蓝牙拥堵
-    String statusMsg = "TRACK:Err=" + String(error) + ",Ang=" + String(currentServoAngle) + ",Spd=" + String(currentSpeed);
+  if (fabs(error) >= 2.0f)
+  {
+    String statusMsg = "TRACK:Err=" + String(error, 1) +
+                       ",Ang=" + String(currentServoAngle, 1) +
+                       ",Spd=" + String(currentSpeed);
     SerialBT.println(statusMsg);
   }
 }
